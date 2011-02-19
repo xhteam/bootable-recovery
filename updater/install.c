@@ -38,15 +38,18 @@
 #include "mtdutils/mtdutils.h"
 #include "updater.h"
 #include "applypatch/applypatch.h"
+#include "ubifs.h"
 
 #ifdef USE_EXT4
 #include "make_ext4fs.h"
+int mkfs_ext4(const char *path);
 #endif
 
 // mount(fs_type, partition_type, location, mount_point)
 //
 //    fs_type="yaffs2" partition_type="MTD"     location=partition
 //    fs_type="ext4"   partition_type="EMMC"    location=device
+//    fs_type="ubifs"  partition_type="UBI"	location=device
 Value* MountFn(const char* name, State* state, int argc, Expr* argv[]) {
     char* result = NULL;
     if (argc != 4) {
@@ -181,6 +184,7 @@ done:
 //
 //    fs_type="yaffs2" partition_type="MTD"     location=partition fs_size=<bytes>
 //    fs_type="ext4"   partition_type="EMMC"    location=device    fs_size=<bytes>
+//    fs_type "ubifs"  partition_type="UBIFS"   location=device    fs_size=<bytes>
 //    if fs_size == 0, then make_ext4fs uses the entire partition.
 //    if fs_size > 0, that is the size to use
 //    if fs_size < 0, then reserve that many bytes at the end of the partition
@@ -240,7 +244,10 @@ Value* FormatFn(const char* name, State* state, int argc, Expr* argv[]) {
         result = location;
 #ifdef USE_EXT4
     } else if (strcmp(fs_type, "ext4") == 0) {
-        int status = make_ext4fs(location, atoll(fs_size));
+	int status = mkfs_ext4(location);
+	/* Use need to disable extents feather to let u-boot access
+	 * the recovery file, use a different format command to do this. */
+	/* int status = make_ext4fs(location, atoll(fs_size)); */
         if (status != 0) {
             fprintf(stderr, "%s: make_ext4fs failed (%d) on %s",
                     name, status, location);
@@ -249,6 +256,18 @@ Value* FormatFn(const char* name, State* state, int argc, Expr* argv[]) {
         }
         result = location;
 #endif
+    } else if (strcmp(fs_type, "ubifs") == 0) {
+	char cmd[1024];
+	/* UBIFS use ubiupdatevol to format volume */
+	sprintf(cmd, "%s %s -t", UBI_UPDATE, location);
+	fprintf(stdout, "FormatFn: system(%s)", cmd);
+	int ret = system(cmd);
+	if (ret != 0) {
+	    fprintf(stderr, "cmd:%s failed with %d errno:%d", cmd, ret, errno);
+	    result = strdup("");
+	    goto done;
+	}
+	result = location;
     } else {
         fprintf(stderr, "%s: unsupported fs_type \"%s\" partition_type \"%s\"",
                 name, fs_type, partition_type);

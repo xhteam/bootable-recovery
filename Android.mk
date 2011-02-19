@@ -9,6 +9,7 @@ LOCAL_SRC_FILES := \
     install.c \
     roots.c \
     ui.c \
+    ext4.c \
     verifier.c
 
 LOCAL_MODULE := recovery
