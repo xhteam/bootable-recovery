@@ -792,6 +792,136 @@ Value* FileGetPropFn(const char* name, State* state, int argc, Expr* argv[]) {
     return StringValue(result);
 }
 
+/* EMMC have a boot partition, need unlock before write uboot image. */
+/* sysfs_file_write(path, value) */
+static Value *
+SysfsFileWriteFn(const char *name, State *state, int argc, Expr * argv[])
+{
+    char *result = NULL, *path, *lock_value;
+    char file_path[PATH_MAX];
+    int ret, t;
+    FILE *f;
+
+    if (ReadArgs(state, argv, 2, &path, &lock_value) < 0) {
+	fprintf(stderr, "%s: usage: sysfs_file_write(path, value).", __func__);
+	return NULL;
+    }
+
+    /* path is like: mmc_host/mmc0/mmc0:0001/boot_config */
+    /* boot partition config for emmc is:
+     */
+    strcpy(file_path, "/sys/");
+    strncat(file_path, path, PATH_MAX);
+
+    fprintf(stderr, "%s: writing %s to %s\n", __func__, lock_value, file_path);
+    f = fopen(file_path, "wb");
+    if (!f) {
+	fprintf(stderr, "%s: can't open file:%s\n", __func__, file_path);
+	return StringValue(strdup(""));
+    }
+
+    t = strlen(lock_value);
+    t = t > 10 ? 10 : t;
+
+    ret = fwrite(lock_value, t, 1, f);
+
+    if (ret < 0) {
+	fprintf(stderr, "%s: error on writing file:%s :%s\n",
+		__func__, file_path, strerror(errno));
+	fclose(f);
+	return StringValue(strdup(""));
+    }
+
+    fclose(f);
+    return StringValue(strdup("t"));
+}
+
+/* simple_dd(if, of, seek) */
+static Value *
+SimpleDDFn(const char *name, State *state, int argc, Expr * argv[])
+{
+    char *inputfile, *outfile, *seek, *result;
+    int ret;
+    struct stat buf;
+    if (ReadArgs(state, argv, 3, &inputfile, &outfile, &seek) < 0) {
+	fprintf(stderr, "simple_dd: argument not right, simple_dd(if, of, seek)");
+	return NULL;
+    }
+
+    if (strlen(inputfile) == 0) {
+	ErrorAbort(state, "input_file argument to %s can't be empty", name);
+	return StringValue(strdup(""));
+    }
+    if (strlen(outfile) == 0) {
+	ErrorAbort(state, "input_file argument to %s can't be empty", name);
+	return StringValue(strdup(""));
+    }
+    if (strlen(seek) == 0) {
+	ErrorAbort(state, "seek argument to %s can't be empty", name);
+	return StringValue(strdup(""));
+    }
+
+    if (stat(inputfile, &buf) != 0) {
+	ErrorAbort(state, "input file:%s not exist", inputfile);
+	return StringValue(strdup(""));
+    }
+    if (stat(outfile, &buf) != 0) {
+	ErrorAbort(state, "output file:%s not exist", outfile);
+	return StringValue(strdup(""));
+    }
+
+    FILE *fin = NULL, *fout = NULL;
+
+    fin = fopen(inputfile, "rb");
+    if (!fin) {
+	ErrorAbort(state, "can't open input file:%s : %s",
+		   inputfile, strerror(errno));
+	return StringValue(strdup(""));
+    }
+    fout = fopen(outfile, "wb");
+    if (!fout) {
+	ErrorAbort(state, "can't open output file:%s : %s",
+		   outfile, strerror(errno));
+	goto error;
+    }
+
+    long seek_offset = atol(seek);
+    if (seek_offset != 0) {
+	ret = fseek(fout, seek_offset, SEEK_SET);
+	if (ret < 0) {
+	    ErrorAbort(state, "can't seek: %l to :%s : %s ",
+		       seek_offset, outfile, strerror(errno));
+	    goto error;
+	}
+    }
+
+    while (!feof(fin)) {
+	char *buffer[4096];
+	int n = fread(buffer, 1, 4096, fin);
+	if (n < 0) {
+	    ErrorAbort(state, "fread error:%s :%s ",
+		       inputfile, strerror(errno));
+	    goto error;
+	}
+	int r = fwrite(buffer, 1, 4096, fout);
+	if (r < 0) {
+	    ErrorAbort(state, "fwrite error:%s : %s", outfile, strerror(errno));
+	    goto error;
+	}
+	sync();
+    }
+
+    fclose(fin);
+    fclose(fout);
+    sync();
+    return StringValue(strdup("t"));
+error:
+    if (fin)
+	fclose(fin);
+    if (fout)
+	fclose(fout);
+    return StringValue(strdup(""));
+}
 
 static bool write_raw_image_cb(const unsigned char* data,
                                int data_len, void* ctx) {
@@ -1216,6 +1346,8 @@ void RegisterInstallFunctions() {
 
     RegisterFunction("getprop", GetPropFn);
     RegisterFunction("file_getprop", FileGetPropFn);
+    RegisterFunction("simple_dd", SimpleDDFn);
+    RegisterFunction("sysfs_file_write", SysfsFileWriteFn);
     RegisterFunction("write_raw_image", WriteRawImageFn);
 
     RegisterFunction("apply_patch", ApplyPatchFn);
