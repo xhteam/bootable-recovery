@@ -168,6 +168,10 @@ static int get_framebuffer(GGLSurface *fb)
       vi.transp.offset  = 0;
       vi.transp.length  = 0;
     }
+
+    vi.yres_virtual = vi.yres * 2;
+    /* Make sure it was double buffer. */
+
     if (ioctl(fd, FBIOPUT_VSCREENINFO, &vi) < 0) {
         perror("failed to put fb0 info");
         close(fd);
