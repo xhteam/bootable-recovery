@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2007 The Android Open Source Project
- * Copyright (C) 2011 Freescale Semiconductor, Inc.
+ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -172,6 +172,15 @@ static int get_framebuffer(GGLSurface *fb)
     vi.yres_virtual = vi.yres * 2;
     /* Make sure it was double buffer. */
 
+#ifdef FSL_EPDC_FB
+    vi.bits_per_pixel = 16;
+    vi.grayscale = 0;
+    vi.yoffset = 0;
+    vi.rotate = FB_ROTATE_UR;
+    vi.activate = FB_ACTIVATE_FORCE;
+    epdc_fd = fd;
+#endif
+
     if (ioctl(fd, FBIOPUT_VSCREENINFO, &vi) < 0) {
         perror("failed to put fb0 info");
         close(fd);
@@ -183,21 +192,6 @@ static int get_framebuffer(GGLSurface *fb)
         close(fd);
         return -1;
     }
-
-#ifdef FSL_EPDC_FB
-    vi.bits_per_pixel = 16;
-    vi.grayscale = 0;
-    vi.yoffset = 0;
-    vi.rotate = FB_ROTATE_UR;
-    vi.activate = FB_ACTIVATE_FORCE;
-    epdc_fd = fd;
-
-    if (ioctl(fd, FBIOPUT_VSCREENINFO, &vi) < 0) {
-        perror("failed to put fb0 info");
-        close(fd);
-        return -1;
-    }
-#endif
 
     bits = mmap(0, fi.smem_len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (bits == MAP_FAILED) {
